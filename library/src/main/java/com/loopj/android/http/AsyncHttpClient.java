@@ -1,22 +1,19 @@
+package com.loopj.android.http;
+
 /*
     Android Asynchronous Http Client
     Copyright (c) 2011 James Smith <james@loopj.com>
     https://loopj.com
-
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
     You may obtain a copy of the License at
-
         https://www.apache.org/licenses/LICENSE-2.0
-
     Unless required by applicable law or agreed to in writing, software
     distributed under the License is distributed on an "AS IS" BASIS,
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     See the License for the specific language governing permissions and
     limitations under the License.
 */
-
-package com.loopj.android.http;
 
 import android.content.Context;
 import android.os.Looper;
@@ -50,6 +47,7 @@ import cz.msebera.android.httpclient.HttpRequestInterceptor;
 import cz.msebera.android.httpclient.HttpResponse;
 import cz.msebera.android.httpclient.HttpResponseInterceptor;
 import cz.msebera.android.httpclient.HttpVersion;
+import cz.msebera.android.httpclient.auth.AuthSchemeRegistry;
 import cz.msebera.android.httpclient.auth.AuthScope;
 import cz.msebera.android.httpclient.auth.AuthState;
 import cz.msebera.android.httpclient.auth.Credentials;
@@ -60,6 +58,7 @@ import cz.msebera.android.httpclient.client.HttpClient;
 import cz.msebera.android.httpclient.client.RedirectHandler;
 import cz.msebera.android.httpclient.client.methods.HttpEntityEnclosingRequestBase;
 import cz.msebera.android.httpclient.client.methods.HttpHead;
+import cz.msebera.android.httpclient.client.methods.HttpOptions;
 import cz.msebera.android.httpclient.client.methods.HttpPatch;
 import cz.msebera.android.httpclient.client.methods.HttpPost;
 import cz.msebera.android.httpclient.client.methods.HttpPut;
@@ -251,6 +250,11 @@ public class AsyncHttpClient {
         httpClient.addRequestInterceptor(new HttpRequestInterceptor() {
             @Override
             public void process(final HttpRequest request, final HttpContext context) throws HttpException, IOException {
+
+                AuthSchemeRegistry authSchemeRegistry = new AuthSchemeRegistry();
+                authSchemeRegistry.register("Bearer", new BearerAuthSchemeFactory());
+                context.setAttribute(ClientContext.AUTHSCHEME_REGISTRY, authSchemeRegistry);
+
                 AuthState authState = (AuthState) context.getAttribute(ClientContext.TARGET_AUTH_STATE);
                 CredentialsProvider credsProvider = (CredentialsProvider) context.getAttribute(
                         ClientContext.CREDS_PROVIDER);
@@ -259,7 +263,10 @@ public class AsyncHttpClient {
                 if (authState.getAuthScheme() == null) {
                     AuthScope authScope = new AuthScope(targetHost.getHostName(), targetHost.getPort());
                     Credentials creds = credsProvider.getCredentials(authScope);
-                    if (creds != null) {
+                    if (creds instanceof TokenCredentials) {
+                        authState.setAuthScheme(new BearerAuthSchemeFactory.BearerAuthScheme());
+                        authState.setCredentials(creds);
+                    } else if (creds != null) {
                         authState.setAuthScheme(new BasicScheme());
                         authState.setCredentials(creds);
                     }
@@ -792,6 +799,31 @@ public class AsyncHttpClient {
     }
 
     /**
+     * Sets bearer authentication for the request. Uses AuthScope.ANY. This is the same as
+     * setBearerAuth('token',AuthScope.ANY, false)
+     *
+     * @param token Bearer Token
+     */
+    public void setBearerAuth(String token) {
+        setBearerAuth(token, AuthScope.ANY, false);
+    }
+
+
+    /**
+     * Sets bearer authentication for the request. You should pass in your AuthScope for security. It
+     * should be like this setBearerAuth("token", new AuthScope("host",port,AuthScope.ANY_REALM), false)
+     *
+     * @param token      Bearer Token
+     * @param scope      an AuthScope object
+     * @param preemptive sets authorization in preemptive manner
+     */
+    public void setBearerAuth(String token, AuthScope scope, boolean preemptive) {
+        TokenCredentials credentials = new TokenCredentials(token);
+        setCredentials(scope, credentials);
+        setAuthenticationPreemptive(preemptive);
+    }
+
+    /**
      * Sets basic authentication for the request. Uses AuthScope.ANY. This is the same as
      * setBasicAuth('username','password',AuthScope.ANY)
      *
@@ -957,6 +989,24 @@ public class AsyncHttpClient {
     }
 
     // [-] HTTP HEAD
+    // [+] HTTP OPTIONS
+
+    /**
+     * Perform a HTTP OPTIONS request, without any parameters.
+     *
+     * @param url             the URL to send the request to.
+     * @param responseHandler the response handler instance that should handle the response.
+     * @return RequestHandle of future request process
+     */
+    public RequestHandle options(String url, ResponseHandlerInterface responseHandler) {
+        return options(null, url, null, responseHandler);
+    }
+
+    public RequestHandle options(Context context, String url, RequestParams params, ResponseHandlerInterface responseHandler) {
+        return sendRequest(httpClient, httpContext, new HttpOptions(getUrlWithQueryString(isUrlEncodingEnabled(), url, params)), null, responseHandler, context);
+    }
+
+    // [-] HTTP OPTIONS
     // [+] HTTP GET
 
     /**
